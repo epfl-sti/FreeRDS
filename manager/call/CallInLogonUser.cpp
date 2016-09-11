@@ -93,6 +93,7 @@ namespace freerds
 		WLog_Print(logger_CallInLogonUser, WLOG_DEBUG,
 			"response: serviceEndPoint=%s", mPipeName.c_str());
 
+		m_Response.status = (mAuthStatus == 0) ? 0 : 1;
 		m_Response.ServiceEndpoint = (char*) mPipeName.c_str();
 
 		s = freerds_rpc_msg_pack(m_ResponseId, &m_Response, NULL);
@@ -300,15 +301,27 @@ namespace freerds
 
 	int CallInLogonUser::doStuff()
 	{
+        	if (mPassword.size() == 0) {
+                  WLog_Print(logger_CallInLogonUser, WLOG_ERROR,
+                             "No password provided for user %s\\%s, skipping auth",
+                             mDomainName.c_str(), mUserName.c_str());
+                  getAuthSession();
+                  return 0;
+                }
 		int authStatus;
 
 		authStatus = authenticateUser();
 
 		if (authStatus != 0)
-			getAuthSession();
-		else
-			getUserSession();
-
+                {
+                  WLog_Print(logger_CallInLogonUser, WLOG_ERROR,
+                             "Authentication failed for user %s\\%s",
+                             mDomainName.c_str(), mUserName.c_str());
+                  getAuthSession();
+                  return 0;
+                }
+ 
+		getUserSession();
 		return 0;
 	}
 }

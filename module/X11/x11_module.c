@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #ifndef WIN32
 #include <limits.h>
@@ -387,6 +388,11 @@ char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 
 	x11_rds_module_reset_process_informations(&(x11->X11StartupInfo), &(x11->X11ProcessInformation));
 
+        int userlog = open("/tmp/user.log", O_WRONLY|O_CREAT|O_APPEND);
+        dup2(userlog, 1);
+        dup2(userlog, 2);
+        close(userlog);
+
 	status = CreateProcessAsUserA(x11->commonModule.userToken, NULL, commandLine,
 			NULL, NULL, FALSE, 0, x11->commonModule.envBlock, NULL,
 			&(x11->X11StartupInfo), &(x11->X11ProcessInformation));
@@ -439,14 +445,20 @@ char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 	/* Start the window manager. */
 	if (x11->commonModule.userToken == 0)
 	{
+                WLog_Print(gModuleLog, WLOG_DEBUG, "No user token, running greeter");
 		strcpy(startupname, "simple_greeter");
 	}
 	else
 	{
 		if (!getPropertyStringWrapper(x11->commonModule.baseConfigPath, &g_Config, "startwm", startupname, 256))
 		{
+                        WLog_Print(gModuleLog, WLOG_DEBUG, "User is authenticated, running startwm.sh");
 			strcpy(startupname, "startwm.sh");
 		}
+                else
+                {
+                        WLog_Print(gModuleLog, WLOG_DEBUG, "User is authenticated, but falling back to freerds-channels");
+                }
 	}
 
 	status = CreateProcessAsUserA(x11->commonModule.userToken, NULL, startupname,
@@ -513,6 +525,7 @@ int RdsModuleEntry(RDS_MODULE_ENTRY_POINTS* pEntryPoints)
 
 	WLog_Init();
 	gModuleLog = WLog_Get("com.freerds.module.x11");
+	WLog_SetLogLevel(gModuleLog, WLOG_DEBUG);
 
 	return 0;
 }

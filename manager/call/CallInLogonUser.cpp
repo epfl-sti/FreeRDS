@@ -35,6 +35,7 @@ namespace freerds
 	  mClientHardwareId(0), mClientProtocolType(0),
 	  m_RequestId(FDSAPI_LOGON_USER_REQUEST_ID), m_ResponseId(FDSAPI_LOGON_USER_RESPONSE_ID)
 	{
+          WLog_SetLogLevel(logger_CallInLogonUser, WLOG_DEBUG);
 
 	};
 

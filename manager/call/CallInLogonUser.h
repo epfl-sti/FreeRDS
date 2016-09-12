@@ -27,6 +27,8 @@
 #include "CallFactory.h"
 #include "CallIn.h"
 
+namespace freerds { class AuthModule; }
+
 namespace freerds
 {
 	class CallInLogonUser: public CallIn
@@ -42,9 +44,9 @@ namespace freerds
 
 	private:
 
-		int authenticateUser();
-		int getAuthSession();
-		int getUserSession();
+		void authenticateUser();
+		void getAuthSession();
+		void getUserSession();
 
 		std::string mUserName;
 		std::string mDomainName;
@@ -53,6 +55,8 @@ namespace freerds
 		long mWidth;
 		long mHeight;
 		long mColorDepth;
+
+                freerds::AuthModule* mAuth = NULL;
 
 		std::string mClientName;
 		std::string mClientAddress;

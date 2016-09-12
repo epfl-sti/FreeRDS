@@ -41,7 +41,9 @@ namespace freerds
 
 	CallInLogonUser::~CallInLogonUser()
 	{
-
+		if (mAuth) {
+			delete mAuth;
+		}
 	};
 
 	unsigned long CallInLogonUser::getCallType()
@@ -105,7 +107,7 @@ namespace freerds
 		return 0;
 	};
 
-	int CallInLogonUser::authenticateUser()
+	void CallInLogonUser::authenticateUser()
 	{
 		ConnectionPtr currentConnection = APP_CONTEXT.getConnectionStore()->getOrCreateConnection(mConnectionId);
 
@@ -115,25 +117,25 @@ namespace freerds
 				"connection does not exist for connectionId=%lu",
 				mConnectionId);
 			mAuthStatus = -1;
-			return -1;
+			return;
 		}
 
 		WLog_Print(logger_CallInLogonUser, WLOG_DEBUG, "authenticating user");
-		AuthModule* auth = currentConnection->load_AuthModule();
-		if (!auth) {
-			return 1;
+		if (! mAuth) {
+			mAuth = currentConnection->load_AuthModule();
+		}
+		if (! mAuth) {
+			WLog_Print(logger_CallInLogonUser, WLOG_ERROR, "Unable to load auth module");
+			mAuthStatus = -1;
+			return;
 		}
 
-		int authStatus = currentConnection->authenticateUser(auth, mUserName, mDomainName, mPassword);
+		mAuthStatus = currentConnection->authenticateUser(mAuth, mUserName, mDomainName, mPassword);
 
-		delete auth;
-
-		WLog_Print(logger_CallInLogonUser, WLOG_DEBUG, "authentication %s", authStatus == 0 ? "succeeded" : "failed");
-
-		return authStatus;
+		WLog_Print(logger_CallInLogonUser, WLOG_DEBUG, "authentication %s", mAuthStatus == 0 ? "succeeded" : "failed");
 	}
 
-	int CallInLogonUser::getUserSession()
+	void CallInLogonUser::getUserSession()
 	{
 		bool reconnectAllowed;
 		SessionPtr currentSession;
@@ -202,7 +204,7 @@ namespace freerds
 					"generateUserToken failed for user %s with domain %s",
 					mUserName.c_str(), mDomainName.c_str());
 				mResult = 1;// will report error with answer
-				return 1;
+				return;
 			}
 
 			if (!currentSession->generateEnvBlockAndModify())
@@ -211,7 +213,7 @@ namespace freerds
 					"generateEnvBlockAndModify failed for user %s with domain %s",
 					mUserName.c_str(), mDomainName.c_str());
 				mResult = 1;// will report error with answer
-				return 1;
+				return;
 			}
 			std::string moduleConfigName;
 
@@ -237,7 +239,7 @@ namespace freerds
 					currentSession->getModuleConfigName().c_str(),
 					mUserName.c_str(), mDomainName.c_str());
 				mResult = 1;// will report error with answer
-				return 1;
+				return;
 			}
 		}
 
@@ -245,10 +247,10 @@ namespace freerds
 
 		mPipeName = currentSession->getPipeName();
 
-		return 0;
+		return;
 	}
 
-	int CallInLogonUser::getAuthSession()
+	void CallInLogonUser::getAuthSession()
 	{
 		// authentication failed, start up greeter module
 		ConnectionPtr currentConnection = APP_CONTEXT.getConnectionStore()->getOrCreateConnection(mConnectionId);
@@ -283,7 +285,7 @@ namespace freerds
 				"generateEnvBlockAndModify failed for user %s with domain %s",
 				mUserName.c_str(), mDomainName.c_str());
 			mResult = 1;// will report error with answer
-			return 1;
+			return;
 		}
 
 		currentConnection->setSessionId(currentSession->getSessionId());
@@ -298,13 +300,12 @@ namespace freerds
 		{
 			WLog_Print(logger_CallInLogonUser, WLOG_ERROR, "could not start greeter");
 			mResult = 1;// will report error with answer
-			return 1;
+			return;
 		}
 
 		currentSession->setConnectState(WTSConnected);
 
 		mPipeName = currentSession->getPipeName();
-		return 0;
 	}
 
 	int CallInLogonUser::doStuff()
@@ -316,11 +317,10 @@ namespace freerds
                   getAuthSession();
                   return 0;
                 }
-		int authStatus;
 
-		authStatus = authenticateUser();
+		authenticateUser();
 
-		if (authStatus != 0)
+		if (mAuthStatus != 0)
                 {
                   WLog_Print(logger_CallInLogonUser, WLOG_ERROR,
                              "Authentication failed for user %s\\%s",

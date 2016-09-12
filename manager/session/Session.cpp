@@ -46,6 +46,7 @@ namespace freerds
 	  mSessionStarted(false), mpEnvBlock(NULL),
 	  mCurrentState(WTSDown), mUserToken(NULL),
 	  mCurrentModuleContext(NULL), mAuthSession(false),
+	  mAuth(NULL),
 	  mClientDisplayColorDepth(0), mClientDisplayWidth(0), mClientDisplayHeight(0),
 	  mClientHardwareId(0), mClientBuildNumber(0), mClientProductId(0), mClientProtocolType(0)
 	{
@@ -63,6 +64,10 @@ namespace freerds
 	{
 		// Mark the session as down.
 		setConnectState(WTSDown);
+		if (mAuth) {
+			mAuth->sessionStop();
+			delete mAuth;
+		}
 
 		// Fire a session terminated event.
 		FDSApiServer* FDSApiServer = APP_CONTEXT.getFDSApiServer();
@@ -318,7 +323,7 @@ namespace freerds
 
 	bool Session::startModule(freerds::AuthModule** transferred_auth, std::string& pipeName)
 	{
-		delete *transferred_auth;  // XXX Keep it around for ::stopModule
+		mAuth = *transferred_auth;
 		*transferred_auth = NULL;
 		std::string pName;
 
@@ -369,6 +374,8 @@ namespace freerds
 			mPipeName = pName;
 			mSessionStarted = true;
 			setConnectState(WTSConnected);
+			if (mAuth)
+				mAuth->sessionStart();
 			return true;
 		}
 	}
@@ -395,6 +402,11 @@ namespace freerds
 		mCurrentModuleContext = NULL;
 		mPipeName.clear();
 		setConnectState(WTSDown);
+		if (mAuth) {
+			mAuth->sessionStop();
+			delete mAuth;
+			mAuth = NULL;
+		}
 
 		return true;
 	}

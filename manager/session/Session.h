@@ -99,6 +99,7 @@ namespace freerds
 		UINT32 m_SessionId;
 		bool mAuthSession;
 		bool mSessionStarted;
+		freerds::AuthModule* mAuth;
 
 		std::string mUsername;
 		std::string mDomain;

@@ -34,35 +34,35 @@ struct t_user_pass
 	char pass[256];
 };
 
-struct t_auth_info
+struct rds_auth_module_pam
 {
+	rdsAuthModule common;
 	struct t_user_pass user_pass;
-	int session_opened;
-	int did_setcred;
 	struct pam_conv pamc;
+	int pam_error;
 	pam_handle_t *ph;
 };
 
-static void get_service_name(char* service_name)
+struct rds_auth_module_pam* rds_auth_module_new(void)
 {
-	service_name[0] = 0;
+	struct rds_auth_module_pam* pam = (struct rds_auth_module_pam*) malloc(sizeof(struct rds_auth_module_pam));
 
-	if (PathFileExistsA("/etc/pam.d/freerds"))
-	{
-		strncpy(service_name, "freerds", 255);
+	if (!pam)
+		return NULL;
+
+	ZeroMemory(pam, sizeof(struct rds_auth_module_pam));
+	return pam;
+}
+
+void rds_auth_module_free(struct rds_auth_module_pam* pam)
+{
+	if (!pam)
+		return;
+	if (pam->ph) {
+		pam_end(pam->ph, pam->pam_error);
 	}
-	else if (PathFileExistsA("/etc/pam.d/common-auth"))
-	{
-		strncpy(service_name, "common-auth", 255);
-	}
-	else if (PathFileExistsA("/etc/pam.d/gdm-password"))
-	{
-		strncpy(service_name, "gdm-password", 255);
-	}
-	else
-	{
-		strncpy(service_name, "gdm", 255);
-	}
+
+	free(pam);
 }
 
 static int verify_pam_conv(int num_msg, const struct pam_message **msg, struct pam_response **resp, void *appdata_ptr)
@@ -105,61 +105,48 @@ static int verify_pam_conv(int num_msg, const struct pam_message **msg, struct p
 	return PAM_SUCCESS;
 }
 
-BOOL freerds_authenticate_pam(char* username, char* password, int* errorcode)
+BOOL freerds_authenticate_pam(struct rds_auth_module_pam* pam, char* username, char* password, int* errorcode)
 {
-	int error;
-	char service_name[256];
-	struct t_auth_info* auth_info;
-
-	get_service_name(service_name);
-	auth_info = malloc(sizeof(struct t_auth_info));
-	ZeroMemory(auth_info, sizeof(struct t_auth_info));
-	strcpy(auth_info->user_pass.user, username);
+	pam->user_pass.user[0] = '\0';
+	strncat(pam->user_pass.user, username, 255);
 	if (password) {
-		strcpy(auth_info->user_pass.pass, password);
+		pam->user_pass.pass[0] = '\0',
+		strncat(pam->user_pass.pass, password, 255);
 	}
-	auth_info->pamc.conv = &verify_pam_conv;
-	auth_info->pamc.appdata_ptr = &(auth_info->user_pass);
-	error = pam_start(service_name, 0, &(auth_info->pamc), &(auth_info->ph));
+	pam->pamc.conv = &verify_pam_conv;
+	pam->pamc.appdata_ptr = &(pam->user_pass);
+	pam->pam_error = pam_start("freerds", 0, &(pam->pamc), &(pam->ph));
 
-	if (error != PAM_SUCCESS)
+	if (pam->pam_error != PAM_SUCCESS)
 	{
 		if (errorcode != NULL)
-			*errorcode = error;
+			*errorcode = pam->pam_error;
 
 		printf("pam_start failed\n");
-		free(auth_info);
 		return FALSE;
 	}
 
-	error = pam_authenticate(auth_info->ph, 0);
+	pam->pam_error = pam_authenticate(pam->ph, 0);
 
-	if (error != PAM_SUCCESS)
+	if (pam->pam_error != PAM_SUCCESS)
 	{
 		if (errorcode != NULL)
-			*errorcode = error;
+			*errorcode = pam->pam_error;
 
-		printf("pam_authenticate failed: %s\n", pam_strerror(auth_info->ph, error));
-		pam_end(auth_info->ph, error);
-		free(auth_info);
+		printf("pam_authenticate failed: %s\n", pam_strerror(pam->ph, pam->pam_error));
 		return FALSE;
 	}
 
-	error = pam_acct_mgmt(auth_info->ph, 0);
+	pam->pam_error = pam_acct_mgmt(pam->ph, 0);
 
-	if (error != PAM_SUCCESS)
+	if (pam->pam_error != PAM_SUCCESS)
 	{
 		if (errorcode != NULL)
-			*errorcode = error;
+			*errorcode = pam->pam_error;
 
-		printf("pam_acct_mgmt failed: %s\n", pam_strerror(auth_info->ph, error));
-		pam_end(auth_info->ph, error);
-		free(auth_info);
+		printf("pam_acct_mgmt failed: %s\n", pam_strerror(pam->ph, pam->pam_error));
 		return FALSE;
 	}
-
-	pam_end(auth_info->ph, 0);
-	free(auth_info);
 
 	return TRUE;
 }
@@ -168,33 +155,7 @@ BOOL freerds_authenticate_pam(char* username, char* password, int* errorcode)
  * FreeRDS Authentication Module Interface
  */
 
-struct rds_auth_module_pam
-{
-	rdsAuthModule common;
-};
-typedef struct rds_auth_module_pam rdsAuthModulePam;
-
-rdsAuthModulePam* rds_auth_module_new(void)
-{
-	rdsAuthModulePam* pam;
-
-	pam = (rdsAuthModulePam*) malloc(sizeof(rdsAuthModulePam));
-
-	if (!pam)
-		return NULL;
-
-	return pam;
-}
-
-void rds_auth_module_free(rdsAuthModulePam* pam)
-{
-	if (!pam)
-		return;
-
-	free(pam);
-}
-
-int rds_auth_logon_user(rdsAuthModulePam* pam, char* username, char* domain, char* password)
+int rds_auth_logon_user(struct rds_auth_module_pam* pam, char* username, char* domain, char* password)
 {
 	BOOL auth_status;
 	int error_code = 0;
@@ -202,10 +163,36 @@ int rds_auth_logon_user(rdsAuthModulePam* pam, char* username, char* domain, cha
 	if (!pam)
 		return -1;
 
-	auth_status = freerds_authenticate_pam(username, password, &error_code);
+	auth_status = freerds_authenticate_pam(pam, username, password, &error_code);
 
 	if (!auth_status)
 		return -1;
+
+	return 0;
+}
+
+int rds_auth_module_session_start(struct rds_auth_module_pam* pam) {
+	if (!pam)
+		return -1;
+
+	pam->pam_error = pam_open_session (pam->ph, 0);
+	if (pam->pam_error != PAM_SUCCESS) {
+		printf("pam_open_session failed: %s\n", pam_strerror(pam->ph, pam->pam_error));
+		return -1;
+	}
+
+	return 0;
+}
+
+int rds_auth_module_session_stop(struct rds_auth_module_pam* pam) {
+	if (!pam)
+		return -1;
+
+	pam->pam_error = pam_close_session (pam->ph, 0);
+	if (PAM_SUCCESS != pam->pam_error) {
+		printf("pam_close_session failed: %s", pam_strerror (pam->ph, pam->pam_error));
+		return -1;
+	}
 
 	return 0;
 }
@@ -216,6 +203,8 @@ int RdsAuthModuleEntry(RDS_AUTH_MODULE_ENTRY_POINTS* pEntryPoints)
 
 	pEntryPoints->New = (pRdsAuthModuleNew) rds_auth_module_new;
 	pEntryPoints->Free = (pRdsAuthModuleFree) rds_auth_module_free;
+	pEntryPoints->SessionStart = (pRdsAuthModuleSessionStart) rds_auth_module_session_start;
+	pEntryPoints->SessionStop = (pRdsAuthModuleSessionStop) rds_auth_module_session_stop;
 
 	pEntryPoints->LogonUser = (pRdsAuthLogonUser) rds_auth_logon_user;
 

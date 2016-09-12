@@ -39,6 +39,7 @@
 
 namespace freerds
 {
+
 	static wLog* logger_Connection = WLog_Get("freerds.Connection");
 
 	Connection::Connection(DWORD connectionId)
@@ -78,7 +79,32 @@ namespace freerds
 		return m_ConnectionId;
 	}
 
+	AuthModule* Connection::load_AuthModule() {
+		std::string authModule;
+
+		if (!APP_CONTEXT.getPropertyManager()->getPropertyString("auth.module", authModule)) {
+			authModule = "PAM";
+		}
+		AuthModule* auth = AuthModule::loadFromName(authModule);
+		if (!auth) {
+			WLog_Print(logger_Connection, WLOG_ERROR, "Unable to load authentication module %s", authModule.c_str());
+		}
+		return auth;
+	}
+
 	int Connection::authenticateUser(std::string username, std::string domain, std::string password)
+	{
+ 		AuthModule* auth = load_AuthModule();
+		if (!auth) {
+			return 1;
+		}
+
+		int retval = authenticateUser(auth, username, domain, password);
+		delete auth;
+		return retval;
+	}
+
+	int Connection::authenticateUser(AuthModule* auth, std::string username, std::string domain, std::string password)
 	{
 		CSGuard guard(&m_CSection);
 
@@ -87,22 +113,7 @@ namespace freerds
 			return -1;
 		}
 
-		std::string authModule;
-
-		if (!APP_CONTEXT.getPropertyManager()->getPropertyString("auth.module", authModule)) {
-			authModule = "PAM";
-		}
-
-		AuthModule* auth = AuthModule::loadFromName(authModule);
-
-		if (!auth) {
-			return 1;
-		}
-
 		m_AuthStatus = auth->logonUser(username, domain, password);
-
-		delete auth;
-
 		if (m_AuthStatus == 0)
 		{
 			m_Username = username;

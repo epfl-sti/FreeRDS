@@ -31,6 +31,8 @@
 
 #include <freerds/module.h>
 
+namespace freerds { class AuthModule; }
+
 namespace freerds
 {
 	typedef struct _CLIENT_INFORMATION
@@ -59,7 +61,10 @@ namespace freerds
 
 		UINT32 getConnectionId();
 
+		freerds::AuthModule* load_AuthModule();
 		int authenticateUser(std::string username, std::string domain, std::string password);
+
+		int authenticateUser(freerds::AuthModule* auth, std::string username, std::string domain, std::string password);
 
 	private:
 		UINT32 m_ConnectionId;

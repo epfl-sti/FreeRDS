@@ -119,7 +119,15 @@ namespace freerds
 		}
 
 		WLog_Print(logger_CallInLogonUser, WLOG_DEBUG, "authenticating user");
-		int authStatus = currentConnection->authenticateUser(mUserName, mDomainName, mPassword);
+		AuthModule* auth = currentConnection->load_AuthModule();
+		if (!auth) {
+			return 1;
+		}
+
+		int authStatus = currentConnection->authenticateUser(auth, mUserName, mDomainName, mPassword);
+
+		delete auth;
+
 		WLog_Print(logger_CallInLogonUser, WLOG_DEBUG, "authentication %s", authStatus == 0 ? "succeeded" : "failed");
 
 		return authStatus;

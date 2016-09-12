@@ -39,6 +39,8 @@ namespace freerds
 		virtual ~AuthModule();
 
 		int logonUser(std::string username, std::string domain, std::string password);
+                int sessionStart();
+                int sessionStop();
 
 		static pRdsAuthModuleEntry loadModuleEntry(std::string filename);
 		static AuthModule* loadFromFileName(std::string fileName);

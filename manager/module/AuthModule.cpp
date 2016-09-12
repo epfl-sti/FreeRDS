@@ -87,6 +87,20 @@ namespace freerds
 		return status;
 	}
 
+ 	int AuthModule::sessionStart()
+	{
+		if (!mEntryPoints.SessionStart)
+			return 0;
+		return mEntryPoints.SessionStart(mAuth);
+	}
+
+ 	int AuthModule::sessionStop()
+	{
+		if (!mEntryPoints.SessionStop)
+			return 0;
+		return mEntryPoints.SessionStop(mAuth);
+	}
+
 	pRdsAuthModuleEntry AuthModule::loadModuleEntry(std::string filename)
 	{
 		HINSTANCE library;

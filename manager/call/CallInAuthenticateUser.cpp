@@ -25,13 +25,14 @@
 #include "TaskSwitchTo.h"
 
 #include <session/ApplicationContext.h>
+#include <module/AuthModule.h>
 
 namespace freerds
 {
 	static wLog* logger_CallInAuthenticateUser = WLog_Get("freerds.CallInAuthenticateUser");
 
 	CallInAuthenticateUser::CallInAuthenticateUser()
-	: mSessionId(0), mAuthStatus(0),
+	: mSessionId(0), mAuth(NULL), mAuthStatus(0),
 	  m_RequestId(FDSAPI_START_SESSION_REQUEST_ID), m_ResponseId(FDSAPI_START_SESSION_RESPONSE_ID)
 	{
 
@@ -39,7 +40,7 @@ namespace freerds
 
 	CallInAuthenticateUser::~CallInAuthenticateUser()
 	{
-
+		delete mAuth;  // May be NULL
 	};
 
 	unsigned long CallInAuthenticateUser::getCallType()
@@ -105,10 +106,10 @@ namespace freerds
 		}
 
 		WLog_Print(logger_CallInAuthenticateUser, WLOG_DEBUG, "authenticating user");
-		mAuthStatus = currentConnection->authenticateUser(mUserName, mDomainName, mPassword);
-		WLog_Print(logger_CallInAuthenticateUser, WLOG_DEBUG, "authentication %s", mAuthStatus == 0 ? "succeeded" : "failed");
+		mAuth = currentConnection->authenticateUser(mUserName, mDomainName, mPassword);
+		WLog_Print(logger_CallInAuthenticateUser, WLOG_DEBUG, "authentication %s", mAuth == NULL ? "failed": "succeeded");
 
-		return mAuthStatus;
+		return mAuth ? 0 : 1;
 	}
 
 	int CallInAuthenticateUser::getUserSession()
@@ -182,7 +183,7 @@ namespace freerds
 		if (currentSession->getConnectState() == WTSDown)
 		{
 			std::string pipeName;
-			if (!currentSession->startModule(pipeName))
+			if (! currentSession->startModule(&mAuth, pipeName))
 			{
 				WLog_Print(logger_CallInAuthenticateUser, WLOG_ERROR,
 					"ModuleConfig %s does not start properly for user %s in domain %s",
@@ -209,9 +210,7 @@ namespace freerds
 	int CallInAuthenticateUser::doStuff()
 	{
 		if (authenticateUser() == 0) {
-			if (mAuthStatus == 0) {
-				return getUserSession();
-			}
+			return getUserSession();
 		}
 		return 0;
 	}

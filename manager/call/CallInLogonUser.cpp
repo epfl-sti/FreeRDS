@@ -30,7 +30,7 @@ namespace freerds
 	static wLog* logger_CallInLogonUser = WLog_Get("freerds.CallInLogonUser");
 
 	CallInLogonUser::CallInLogonUser()
-	: mConnectionId(0), mAuthStatus(0), mWidth(0), mHeight(0), mColorDepth(0),
+	: mConnectionId(0), mAuth(NULL), mAuthStatus(-1), mWidth(0), mHeight(0), mColorDepth(0),
 	  mClientName(), mClientAddress(), mClientBuildNumber(0), mClientProductId(0),
 	  mClientHardwareId(0), mClientProtocolType(0),
 	  m_RequestId(FDSAPI_LOGON_USER_REQUEST_ID), m_ResponseId(FDSAPI_LOGON_USER_RESPONSE_ID)
@@ -41,9 +41,7 @@ namespace freerds
 
 	CallInLogonUser::~CallInLogonUser()
 	{
-		if (mAuth) {
-			delete mAuth;
-		}
+		delete mAuth;  // May be NULL
 	};
 
 	unsigned long CallInLogonUser::getCallType()
@@ -116,23 +114,20 @@ namespace freerds
 			WLog_Print(logger_CallInLogonUser, WLOG_ERROR,
 				"connection does not exist for connectionId=%lu",
 				mConnectionId);
-			mAuthStatus = -1;
 			return;
 		}
 
-		WLog_Print(logger_CallInLogonUser, WLOG_DEBUG, "authenticating user");
+		mAuth = currentConnection->authenticateUser(mUserName, mDomainName, mPassword);
 		if (! mAuth) {
-			mAuth = currentConnection->load_AuthModule();
-		}
-		if (! mAuth) {
-			WLog_Print(logger_CallInLogonUser, WLOG_ERROR, "Unable to load auth module");
-			mAuthStatus = -1;
-			return;
+			WLog_Print(logger_CallInLogonUser, WLOG_ERROR,
+				"Authentication failed on connectionId=%lu",
+				mConnectionId);
 		}
 
-		mAuthStatus = currentConnection->authenticateUser(mAuth, mUserName, mDomainName, mPassword);
-
-		WLog_Print(logger_CallInLogonUser, WLOG_DEBUG, "authentication %s", mAuthStatus == 0 ? "succeeded" : "failed");
+		WLog_Print(logger_CallInLogonUser, WLOG_ERROR,
+			   "Authentication succeeded on connectionId=%lu",
+			   mConnectionId);
+		mAuthStatus = 0;
 	}
 
 	void CallInLogonUser::getUserSession()
@@ -232,7 +227,7 @@ namespace freerds
 		if (currentSession->getConnectState() == WTSDown)
 		{
 			std::string pipeName;
-			if (!currentSession->startModule(pipeName))
+			if (! currentSession->startModule(&mAuth, pipeName))
 			{
 				WLog_Print(logger_CallInLogonUser, WLOG_ERROR,
 					"ModuleConfig %s does not start properly for user %s in domain %s",
@@ -296,7 +291,7 @@ namespace freerds
 
 		currentSession->setAuthSession(true);
 
-		if (!currentSession->startModule(greeter))
+		if (! currentSession->startModule(&mAuth, greeter))
 		{
 			WLog_Print(logger_CallInLogonUser, WLOG_ERROR, "could not start greeter");
 			mResult = 1;// will report error with answer

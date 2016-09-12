@@ -56,8 +56,6 @@ namespace freerds
 		long mHeight;
 		long mColorDepth;
 
-                freerds::AuthModule* mAuth = NULL;
-
 		std::string mClientName;
 		std::string mClientAddress;
 		long mClientBuildNumber;
@@ -65,6 +63,7 @@ namespace freerds
 		long mClientHardwareId;
 		long mClientProtocolType;
 
+                freerds::AuthModule* mAuth;
 		int mAuthStatus;
 		UINT32 mConnectionId;
 		std::string mPipeName;

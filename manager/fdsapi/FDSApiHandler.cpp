@@ -23,6 +23,7 @@
 
 #include <session/SessionStore.h>
 #include <session/ApplicationContext.h>
+#include <module/AuthModule.h>
 
 #include <winpr/thread.h>
 #include <winpr/synch.h>
@@ -85,13 +86,13 @@ namespace freerds
 		}
 
 		// Attempt to authenticate the user.
-		authStatus = connection->authenticateUser(username, domain, password);
-		if (authStatus != 0)
+		freerds::AuthModule* auth = connection->authenticateUser(username, domain, password);
+		if (! auth)
 		{
 			WLog_Print(logger_FDSApiHandler, WLOG_ERROR,
 				"Could not authenticate session id %d user '%s' in domain '%s'",
 				sessionId, username.c_str(), domain.c_str());
-			return authStatus;
+			return -1;
 		}
 
 		// The user has been authenticated.  Now we can either 1) connect
@@ -127,6 +128,7 @@ namespace freerds
 					"Cannot create a new session for user '%s' in domain '%s'",
 					username.c_str(),
 					domain.c_str());
+				delete auth;
 				return -1;
 			}
 
@@ -165,7 +167,11 @@ namespace freerds
 		connection->getClientInformation()->height = userSession->getClientDisplayHeight();
 		connection->getClientInformation()->colordepth = userSession->getClientDisplayColorDepth();
 
-		if (isNewSession)
+		if (! isNewSession)
+		{
+			delete auth;
+		}
+		else
 		{
 			WLog_Print(logger_FDSApiHandler, WLOG_INFO,
 				"Starting new session %d for user '%s' in domain '%s'",
@@ -173,7 +179,7 @@ namespace freerds
 
 			std::string pipeName;
 
-			if (!userSession->startModule(pipeName))
+			if (!userSession->startModule(&auth, pipeName))
 			{
 				WLog_Print(logger_FDSApiHandler, WLOG_ERROR,
 					"ModuleConfig %s does not start properly for user '%s' in domain '%s'",

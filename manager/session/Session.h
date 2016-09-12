@@ -33,6 +33,8 @@
 
 #include "Connection.h"
 
+namespace freerds { class AuthModule; }
+
 namespace freerds
 {
 	class Session
@@ -81,7 +83,7 @@ namespace freerds
 
 		void setModuleConfigName(std::string configName);
 		std::string getModuleConfigName();
-		bool startModule(std::string & pipeName);
+		bool startModule(freerds::AuthModule** transferred_auth, std::string & pipeName);
 		bool stopModule();
 
 		WTS_CONNECTSTATE_CLASS getConnectState();

@@ -316,8 +316,10 @@ namespace freerds
 		return lpszEnvironmentBlock;
 	}
 
-	bool Session::startModule(std::string& pipeName)
+	bool Session::startModule(freerds::AuthModule** transferred_auth, std::string& pipeName)
 	{
+		delete *transferred_auth;  // XXX Keep it around for ::stopModule
+		*transferred_auth = NULL;
 		std::string pName;
 
 		if (mSessionStarted)

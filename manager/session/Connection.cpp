@@ -79,7 +79,8 @@ namespace freerds
 		return m_ConnectionId;
 	}
 
-	AuthModule* Connection::load_AuthModule() {
+	AuthModule* Connection::authenticateUser(std::string username, std::string domain, std::string password)
+	{
 		std::string authModule;
 
 		if (!APP_CONTEXT.getPropertyManager()->getPropertyString("auth.module", authModule)) {
@@ -88,39 +89,26 @@ namespace freerds
 		AuthModule* auth = AuthModule::loadFromName(authModule);
 		if (!auth) {
 			WLog_Print(logger_Connection, WLOG_ERROR, "Unable to load authentication module %s", authModule.c_str());
-		}
-		return auth;
-	}
-
-	int Connection::authenticateUser(std::string username, std::string domain, std::string password)
-	{
- 		AuthModule* auth = load_AuthModule();
-		if (!auth) {
-			return 1;
+			return NULL;
 		}
 
-		int retval = authenticateUser(auth, username, domain, password);
-		delete auth;
-		return retval;
-	}
-
-	int Connection::authenticateUser(AuthModule* auth, std::string username, std::string domain, std::string password)
-	{
 		CSGuard guard(&m_CSection);
 
 		if (m_AuthStatus == 0) {
 			// a Connection can only be authorized once
-			return -1;
+			delete auth;
+			return NULL;
 		}
 
 		m_AuthStatus = auth->logonUser(username, domain, password);
-		if (m_AuthStatus == 0)
+		if (m_AuthStatus != 0)
 		{
-			m_Username = username;
-			m_Domain = domain;
+			delete auth;
+			return NULL;
 		}
-
-		return m_AuthStatus;
+		m_Username = username;
+		m_Domain = domain;
+		return auth;
 	}
 
 	pCLIENT_INFORMATION Connection::getClientInformation() {

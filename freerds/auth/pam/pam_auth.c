@@ -171,6 +171,13 @@ int rds_auth_logon_user(struct rds_auth_module_pam* pam, char* username, char* d
 	return 0;
 }
 
+char** rds_auth_getenvlist(struct rds_auth_module_pam* pam) {
+	if (!pam)
+		return NULL;
+
+	return pam_getenvlist (pam->ph);
+}
+
 int rds_auth_module_session_start(struct rds_auth_module_pam* pam) {
 	if (!pam)
 		return -1;
@@ -203,10 +210,11 @@ int RdsAuthModuleEntry(RDS_AUTH_MODULE_ENTRY_POINTS* pEntryPoints)
 
 	pEntryPoints->New = (pRdsAuthModuleNew) rds_auth_module_new;
 	pEntryPoints->Free = (pRdsAuthModuleFree) rds_auth_module_free;
+	pEntryPoints->LogonUser = (pRdsAuthLogonUser) rds_auth_logon_user;
+	pEntryPoints->Getenvlist = (pRdsAuthGetenvlist) rds_auth_getenvlist;
 	pEntryPoints->SessionStart = (pRdsAuthModuleSessionStart) rds_auth_module_session_start;
 	pEntryPoints->SessionStop = (pRdsAuthModuleSessionStop) rds_auth_module_session_stop;
 
-	pEntryPoints->LogonUser = (pRdsAuthLogonUser) rds_auth_logon_user;
 
 	return 0;
 }

@@ -47,10 +47,10 @@ typedef void (*pRdsAuthModuleFree)(rdsAuthModule* auth);
 typedef char* (*pRdsAuthModuleStart)(rdsAuthModule* auth);
 typedef int (*pRdsAuthModuleStop)(rdsAuthModule* auth);
 
+typedef int (*pRdsAuthLogonUser)(rdsAuthModule* auth, const char* username, const char* domain, const char* password);
+typedef char** (*pRdsAuthGetenvlist)(rdsAuthModule* auth);
 typedef int (*pRdsAuthModuleSessionStart)(rdsAuthModule* auth);
 typedef int (*pRdsAuthModuleSessionStop)(rdsAuthModule* auth);
-
-typedef int (*pRdsAuthLogonUser)(rdsAuthModule* auth, const char* username, const char* domain, const char* password);
 
 struct rds_auth_module_entry_points_v1
 {
@@ -60,6 +60,7 @@ struct rds_auth_module_entry_points_v1
 	pRdsAuthModuleFree Free;
 
 	pRdsAuthLogonUser LogonUser;
+	pRdsAuthGetenvlist Getenvlist;
 	pRdsAuthModuleSessionStart SessionStart;
 	pRdsAuthModuleSessionStop SessionStop;
 };

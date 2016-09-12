@@ -39,6 +39,7 @@ namespace freerds
 		virtual ~AuthModule();
 
 		int logonUser(std::string username, std::string domain, std::string password);
+                char** getenvlist();
                 int sessionStart();
                 int sessionStop();
 

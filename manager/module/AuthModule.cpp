@@ -87,6 +87,12 @@ namespace freerds
 		return status;
 	}
 
+	char** AuthModule::getenvlist() {
+		if (!mEntryPoints.Getenvlist)
+			return NULL;
+		return mEntryPoints.Getenvlist(mAuth);
+	}
+
  	int AuthModule::sessionStart()
 	{
 		if (!mEntryPoints.SessionStart)

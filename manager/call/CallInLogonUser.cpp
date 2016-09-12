@@ -202,14 +202,6 @@ namespace freerds
 				return;
 			}
 
-			if (!currentSession->generateEnvBlockAndModify())
-			{
-				WLog_Print(logger_CallInLogonUser, WLOG_ERROR,
-					"generateEnvBlockAndModify failed for user %s with domain %s",
-					mUserName.c_str(), mDomainName.c_str());
-				mResult = 1;// will report error with answer
-				return;
-			}
 			std::string moduleConfigName;
 
 			if (!APP_CONTEXT.getPropertyManager()->getPropertyString("module", moduleConfigName)) {
@@ -273,15 +265,6 @@ namespace freerds
 		char winStationName[32];
 		sprintf(winStationName, "RDP-Tcp#%d", mConnectionId);
 		currentSession->setWinStationName(winStationName);
-
-		if (!currentSession->generateAuthEnvBlockAndModify())
-		{
-			WLog_Print(logger_CallInLogonUser, WLOG_ERROR,
-				"generateEnvBlockAndModify failed for user %s with domain %s",
-				mUserName.c_str(), mDomainName.c_str());
-			mResult = 1;// will report error with answer
-			return;
-		}
 
 		currentConnection->setSessionId(currentSession->getSessionId());
 

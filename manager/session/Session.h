@@ -72,10 +72,6 @@ namespace freerds
 		UINT16 getClientProtocolType();
 
 		bool generateUserToken();
-		bool generateEnvBlockAndModify();
-		bool generateAuthEnvBlockAndModify();
-
-		char** getPEnvBlock();
 
 		bool isAuthSession();
 		void setAuthSession(bool authSession);
@@ -119,6 +115,8 @@ namespace freerds
 
 		HANDLE mUserToken;
 		char* mpEnvBlock;
+
+		bool generateEnvBlock();
 
 		std::string mModuleConfigName;
 		std::string mModuleName;

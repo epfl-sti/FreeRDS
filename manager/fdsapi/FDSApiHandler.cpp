@@ -151,8 +151,6 @@ namespace freerds
 
 		userSession->generateUserToken();
 
-		userSession->generateEnvBlockAndModify();
-
 		std::string moduleConfigName;
 
 		if (!propertyManager->getPropertyString("module", moduleConfigName))

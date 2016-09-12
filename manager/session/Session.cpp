@@ -221,29 +221,45 @@ namespace freerds
 				LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, &mUserToken);
 	}
 
-	bool Session::generateEnvBlockAndModify()
+	bool Session::generateEnvBlock()
 	{
 		struct passwd* pwnam;
 		char envstr[256];
-
-		if (mUsername.length() == 0)
-		{
-			 WLog_Print(logger_Session, WLOG_ERROR, "generateEnvBlockAndModify failed, no username!");
-			return false;
-		}
 
 		if (mpEnvBlock)
 		{
 			free(mpEnvBlock);
 			mpEnvBlock = NULL;
 		}
+	
+		if (mAuthSession) {
+			/* Minimal environment for an authentication session */
+			if (mUsername.length() != 0)
+			{
+				SetEnvironmentVariableEBA(&mpEnvBlock, "FREERDS_USER", mUsername.c_str());
+			}
+
+			if (mDomain.length() != 0)
+			{
+				SetEnvironmentVariableEBA(&mpEnvBlock, "FREERDS_DOMAIN", mDomain.c_str());
+			}
+
+			return true;
+		}
+
+		if (mUsername.length() == 0)
+		{
+			 WLog_Print(logger_Session, WLOG_ERROR, "generateEnvBlock failed, no username!");
+			return false;
+		}
+
 
 #ifndef _WIN32
 		pwnam = getpwnam(mUsername.c_str());
 
 		if (!pwnam)
 		{
-			 WLog_Print(logger_Session, WLOG_ERROR, "generateEnvBlockAndModify failed to get user information (getpwnam) for username %s!",mUsername.c_str());
+			 WLog_Print(logger_Session, WLOG_ERROR, "generateEnvBlock failed to get user information (getpwnam) for username %s!",mUsername.c_str());
 			return false;
 		}
 
@@ -254,36 +270,19 @@ namespace freerds
 		SetEnvironmentVariableEBA(&mpEnvBlock, "HOME", pwnam->pw_dir);
 #endif
 
-		return true;
-	}
-
-	bool Session::generateAuthEnvBlockAndModify()
-	{
-		struct passwd* pwnam;
-		char envstr[256];
-
-		if (mpEnvBlock)
-		{
-			free(mpEnvBlock);
-			mpEnvBlock = NULL;
-		}
-
-		if (mUsername.length() != 0)
-		{
-			SetEnvironmentVariableEBA(&mpEnvBlock, "FREERDS_USER", mUsername.c_str());
-		}
-
-		if (mDomain.length() != 0)
-		{
-			SetEnvironmentVariableEBA(&mpEnvBlock, "FREERDS_DOMAIN", mDomain.c_str());
+		if (mAuth) {
+			char **envp = mAuth->getenvlist();
+			if (NULL != envp) {
+				while (NULL != *envp) {
+					char* equals = strchr(*envp, '=');
+					*equals = '\0';
+					SetEnvironmentVariableEBA(&mpEnvBlock, *envp, equals + 1);
+					envp++;
+				}
+			}
 		}
 
 		return true;
-	}
-
-	char** Session::getPEnvBlock()
-	{
-		return &mpEnvBlock;
 	}
 
 	void Session::setModuleConfigName(std::string configName)
@@ -330,6 +329,14 @@ namespace freerds
 		if (mSessionStarted)
 		{
 			WLog_Print(logger_Session, WLOG_ERROR, "startModule failed, session has already be started, stop first.");
+			return false;
+		}
+
+		if (! generateEnvBlock())
+		{
+			WLog_Print(logger_Session, WLOG_ERROR,
+				"generateEnvBlock failed for user %s with domain %s",
+				mUsername.c_str(), mDomain.c_str());
 			return false;
 		}
 

@@ -153,7 +153,7 @@ BOOL freerds_peer_post_connect(freerdp_peer* client)
 	if (!connector)
 		connection->connector = connector = freerds_connector_new(connection);
 
-	connector->Endpoint = endpoint;
+	connector->Endpoint = _strdup(endpoint);
 
 	if (!freerds_connector_connect(connector))
 		return FALSE;
@@ -316,7 +316,7 @@ BOOL freerds_client_process_switch_session(rdsConnection* connection, wMessage* 
 
 	freerds_connector_free(connection->connector);
 	connection->connector = connector = freerds_connector_new(connection);
-	connector->Endpoint = request->ServiceEndpoint;
+	connector->Endpoint = _strdup(request->ServiceEndpoint);
 
 	status = freerds_connector_connect(connector);
 

@@ -87,12 +87,6 @@ namespace freerds
 		return status;
 	}
 
-	char** AuthModule::getenvlist() {
-		if (!mEntryPoints.Getenvlist)
-			return NULL;
-		return mEntryPoints.Getenvlist(mAuth);
-	}
-
  	int AuthModule::sessionStart()
 	{
 		if (!mEntryPoints.SessionStart)
@@ -168,6 +162,21 @@ namespace freerds
 		free(filename);
 
 		return module;
+	}
+
+	void AuthModule::callChildProcessCallback(void* cbData) {
+		AuthModule* that = (AuthModule*) cbData;
+		that->onChildProcess();
+	}
+
+	void AuthModule::onChildProcess() {
+		if (mEntryPoints.OnChildProcess)
+			mEntryPoints.OnChildProcess(mAuth);
+	}
+
+	void AuthModule::getChildProcessCallback(void (**cb)(void *), void **cbData) {
+		*cb = &AuthModule::callChildProcessCallback;
+		*cbData = this;
 	}
 }
 

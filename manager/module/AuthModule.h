@@ -39,9 +39,9 @@ namespace freerds
 		virtual ~AuthModule();
 
 		int logonUser(std::string username, std::string domain, std::string password);
-                char** getenvlist();
                 int sessionStart();
                 int sessionStop();
+                void getChildProcessCallback(void (**)(void *), void **);
 
 		static pRdsAuthModuleEntry loadModuleEntry(std::string filename);
 		static AuthModule* loadFromFileName(std::string fileName);
@@ -51,6 +51,8 @@ namespace freerds
 		rdsAuthModule* mAuth;
 		pRdsAuthModuleEntry mModuleEntry;
 		RDS_AUTH_MODULE_ENTRY_POINTS mEntryPoints;
+                static void callChildProcessCallback(void* cbData);
+                void onChildProcess();
 	};
 }
 

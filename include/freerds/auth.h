@@ -51,6 +51,7 @@ typedef int (*pRdsAuthLogonUser)(rdsAuthModule* auth, const char* username, cons
 typedef char** (*pRdsAuthGetenvlist)(rdsAuthModule* auth);
 typedef int (*pRdsAuthModuleSessionStart)(rdsAuthModule* auth);
 typedef int (*pRdsAuthModuleSessionStop)(rdsAuthModule* auth);
+typedef void (*pRdsAuthModuleOnChildProcess)(rdsAuthModule* auth);
 
 struct rds_auth_module_entry_points_v1
 {
@@ -63,6 +64,7 @@ struct rds_auth_module_entry_points_v1
 	pRdsAuthGetenvlist Getenvlist;
 	pRdsAuthModuleSessionStart SessionStart;
 	pRdsAuthModuleSessionStop SessionStop;
+	pRdsAuthModuleOnChildProcess OnChildProcess;
 };
 
 #define RDS_AUTH_MODULE_INTERFACE_VERSION	1

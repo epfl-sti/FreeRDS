@@ -270,18 +270,6 @@ namespace freerds
 		SetEnvironmentVariableEBA(&mpEnvBlock, "HOME", pwnam->pw_dir);
 #endif
 
-		if (mAuth) {
-			char **envp = mAuth->getenvlist();
-			if (NULL != envp) {
-				while (NULL != *envp) {
-					char* equals = strchr(*envp, '=');
-					*equals = '\0';
-					SetEnvironmentVariableEBA(&mpEnvBlock, *envp, equals + 1);
-					envp++;
-				}
-			}
-		}
-
 		return true;
 	}
 
@@ -367,6 +355,9 @@ namespace freerds
 
 		mCurrentModuleContext->desktopWidth = (int) getClientDisplayWidth();
 		mCurrentModuleContext->desktopHeight = (int) getClientDisplayHeight();
+		if (mAuth) {
+			mAuth->getChildProcessCallback(&(mCurrentModuleContext->childProcessCallback), &(mCurrentModuleContext->childProcessCallbackData));
+		}
 
 		pName = currentModule->start(mCurrentModuleContext);
 

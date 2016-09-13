@@ -19,9 +19,7 @@
  * limitations under the License.
  */
 
-#ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
 
 #include <ctype.h>
 #include <stdio.h>
@@ -29,24 +27,21 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pwd.h>
+#include <grp.h>
 
-#ifndef WIN32
 #include <limits.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
-#endif
+#include <sys/param.h>
+#include <errno.h>
 
-#include <winpr/pipe.h>
-#include <winpr/path.h>
-#include <winpr/shell.h>
-#include <winpr/synch.h>
-#include <winpr/thread.h>
 #include <winpr/wlog.h>
-#include <winpr/environment.h>
 
 #include <freerds/backend.h>
+#include <freerds/auth.h>
 
 #include "x11_module.h"
 
@@ -65,7 +60,10 @@ static wLog* gModuleLog;
 struct rds_module_x11
 {
 	RDS_MODULE_COMMON commonModule;
+	UINT32 displayNum;
+	pid_t childPid;
 
+	// TODO: rinse all of these.
 	STARTUPINFO X11StartupInfo;
 	PROCESS_INFORMATION X11ProcessInformation;
 
@@ -75,7 +73,6 @@ struct rds_module_x11
 	PROCESS_INFORMATION CSProcessInformation;
 	STARTUPINFO WMStartupInfo;
 	PROCESS_INFORMATION WMProcessInformation;
-	UINT32 displayNum;
 };
 typedef struct rds_module_x11 rdsModuleX11;
 
@@ -86,96 +83,10 @@ void x11_rds_module_reset_process_informations(STARTUPINFO* si, PROCESS_INFORMAT
 	ZeroMemory(pi, sizeof(PROCESS_INFORMATION));
 }
 
-int clean_up_process(PROCESS_INFORMATION* pi)
-{
-	DWORD ret = 0;
-
-	if (pi->hProcess)
-	{
-		GetExitCodeProcess(pi->hProcess, &ret);
-		CloseHandle(pi->hProcess);
-		pi->hProcess = NULL;
-	}
-	if (pi->hThread)
-	{
-		CloseHandle(pi->hThread);
-		pi->hThread = NULL;
-	}
-
-	return ret;
-}
-
-void monitoring_thread(void* arg)
-{
-	int status;
-	int ret;
-	rdsModuleX11* x11 = (rdsModuleX11*) arg;
-	
-	while (1)
-	{
-		if (waitpid(x11->X11ProcessInformation.dwProcessId, &status, WNOHANG) != 0)
-		{
-			ret = clean_up_process(&(x11->X11ProcessInformation));
-			WLog_Print(gModuleLog, WLOG_DEBUG, "s %d: X11 process exited with %d (monitoring thread)", x11->commonModule.sessionId, ret);
-			break;
-		}
-		if (waitpid(x11->CSProcessInformation.dwProcessId, &status, WNOHANG) != 0)
-		{
-			ret = clean_up_process(&(x11->CSProcessInformation));
-			WLog_Print(gModuleLog, WLOG_DEBUG, "s %d: CS process exited with %d (monitoring thread)", x11->commonModule.sessionId, ret);
-			break;
-		}
-		if (waitpid(x11->WMProcessInformation.dwProcessId, &status, WNOHANG) != 0)
-		{
-			ret = clean_up_process(&(x11->WMProcessInformation));
-			WLog_Print(gModuleLog, WLOG_DEBUG, "s %d: WM process exited with %d (monitoring thread)", x11->commonModule.sessionId, ret);
-			break;
-		}
-		if (WaitForSingleObject(x11->monitorStopEvent, 200) == WAIT_OBJECT_0)
-		{
-			// monitorStopEvent triggered
-			WLog_Print(gModuleLog, WLOG_DEBUG, "s %d: monitor stop event", x11->commonModule.sessionId);
-			return;
-		}
-	}
-
-	if (x11->CSProcessInformation.hProcess)
-	{
-		kill(x11->CSProcessInformation.dwProcessId, SIGTERM);
-		if (waitpid(x11->CSProcessInformation.dwProcessId, &status, 0) != 0)
-		{
-			ret = clean_up_process(&(x11->CSProcessInformation));
-			WLog_Print(gModuleLog, WLOG_DEBUG, "s %d: CS process exited with %d (monitoring thread)", x11->commonModule.sessionId, ret);
-		}
-	}
-
-	if (x11->WMProcessInformation.hProcess)
-	{
-		kill(x11->WMProcessInformation.dwProcessId, SIGTERM);
-		if (waitpid(x11->WMProcessInformation.dwProcessId, &status, 0) != 0)
-		{
-			ret = clean_up_process(&(x11->WMProcessInformation));
-			WLog_Print(gModuleLog, WLOG_DEBUG, "s %d: WM process exited with %d (monitoring thread)", x11->commonModule.sessionId, ret);
-		}
-	}
-
-	if (x11->X11ProcessInformation.hProcess)
-	{
-		kill(x11->X11ProcessInformation.dwProcessId, SIGTERM);
-		if (waitpid(x11->X11ProcessInformation.dwProcessId, &status, 0) != 0)
-		{
-			ret = clean_up_process(&(x11->X11ProcessInformation));
-			WLog_Print(gModuleLog, WLOG_DEBUG, "s %d: X11 process exited with %d (monitoring thread)", x11->commonModule.sessionId, ret);
-		}
-	}
-
-	g_Status.shutdown(x11->commonModule.sessionId);
-	return;
-}
-
 RDS_MODULE_COMMON* x11_rds_module_new(void)
 {
 	rdsModuleX11* module = (rdsModuleX11*) calloc(1, sizeof(rdsModuleX11));
+	ZeroMemory(module, sizeof(rdsModuleX11));
 	return (RDS_MODULE_COMMON*) module;
 }
 
@@ -192,38 +103,7 @@ void x11_rds_module_free(RDS_MODULE_COMMON* module)
 	free(module);
 }
 
-int x11_rds_stop_process(PROCESS_INFORMATION *pi)
-{
-	int ret = 0, status = 0;
-	int wait = 10;
-
-	/* check if child is still alive */
-	status = waitpid(pi->dwProcessId, &ret, WNOHANG);
-
-	if (status == 0)
-	{
-		kill(pi->dwProcessId, SIGTERM);
-
-		while (wait > 0)
-		{
-			status = waitpid(pi->dwProcessId, &ret, WNOHANG);
-
-			if (status != 0)
-				break;
-
-			usleep(500000);
-			wait--;
-		}
-
-		if (status == 0)
-			kill(pi->dwProcessId, SIGKILL);
-	}
-	clean_up_process(pi);
-
-	return ret;
-}
-
-unsigned int detect_free_display()
+static unsigned int detect_free_display()
 {
 	struct stat tstats;
 	unsigned int i = 0;
@@ -244,269 +124,188 @@ unsigned int detect_free_display()
 	return i;
 }
 
-static char *trim_string(char *string)
+static int delete_named_pipe(char* pipeName)
 {
-	char *p;
-
-	if (string == NULL) return string;
-
-	/* Trim whitespace from the left of the string. */
-	while ((*string != '\0') && isspace(*string)) string++;
-
-	/* Trim whitespace from the right of the string. */
-	p = string + strlen(string) - 1;
-	while ((p >= string) && isspace(*p)) *p-- = '\0';
-
-	return string;
+	char* pipePath = GetNamedPipeUnixDomainSocketFilePathA(pipeName);
+	int status;
+	if (unlink(pipePath) && errno != ENOENT)
+	{
+		WLog_Print(gModuleLog, WLOG_ERROR, "unlink(%s): %s", pipePath, strerror(errno));
+		status = -1;
+	}
+	else
+	{
+		WLog_Print(gModuleLog, WLOG_DEBUG, "unlink(%s): %s (OK)", pipePath, strerror(errno));
+		status = 0;
+	}
+	free(pipePath);
+	return status;
 }
 
-static char *unquote_string(char *string)
+static int wait_named_pipe_exists(int pid, char* pipeName)
 {
-	string = trim_string(string);
-
-	if (string == NULL) return string;
-
-	if (*string == '"')
+	char* pipePath = GetNamedPipeUnixDomainSocketFilePathA(pipeName);
+	struct stat stats;
+	int i;
+	for(i = 0; i < 10; i++)
 	{
-		int length;
+		if (kill(pid, 0) != 0)
+		{
+			WLog_Print(gModuleLog, WLOG_ERROR, "Process gave up!");
+			free(pipePath);
+			return -1;
+		}
+		if (stat(pipePath, &stats) == 0)
+		{
+			free(pipePath);
+			return 0;
+		}
+		WLog_Print(gModuleLog, WLOG_DEBUG, "%s doesn't exist yet, waiting...", pipeName);
+		usleep(500000);
 
-		string++;
-		length = strlen(string);
-		*(string + length - 1) = '\0';
 	}
-
-	return string;
+	WLog_Print(gModuleLog, WLOG_ERROR, "Timed out waiting for %s to appear!", pipePath);
+	free(pipePath);
+	return -1;
 }
 
 char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 {
-	static const char* envNames[] = {
-		"WLOG_APPENDER",
-		"WLOG_FILTER",
-		"WLOG_LEVEL",
-		"WLOG_FILEAPPENDER_OUTPUT_FILE_PATH",
-		"WLOG_FILEAPPENDER_OUTPUT_FILE_NAME"
+	rdsModuleX11* x11 = (rdsModuleX11*) module;
+	x11->displayNum = detect_free_display();
+	char displayName[256];
+	sprintf_s(displayName, 255, ":%d", x11->displayNum);
+
+	signal(SIGCHLD, SIG_IGN);  // Thwarting a zombie apocalypse: it's that simple.
+
+	char* pipeName = (char*) malloc(MAXPATHLEN);
+	if (! pipeName)
+	{
+		return NULL;
+	}
+
+	freerds_named_pipe_get_endpoint_name(x11->displayNum, "X11", pipeName, MAXPATHLEN - 1);
+	WLog_Print(gModuleLog, WLOG_DEBUG, "pipeName is: %s", pipeName);
+
+	if (delete_named_pipe(pipeName)) {
+		free(pipeName);
+		return NULL;
 	};
 
-	BOOL status = TRUE;
-	DWORD SessionId;
-	char envstr[256];
-	char* envstrp;
-	char* filename;
-	char* pipeName;
-	rdsModuleX11* x11;
-	char commandLine[256];
-	char currentDir[256];
-	char* lpCurrentDir;
-	char startupname[256];
-	DWORD cchSize;
-	FILE* file;
-	int i;
+	char x11StartScript[MAXPATHLEN], x11StartScriptQualified[MAXPATHLEN];
 
-	x11 = (rdsModuleX11*) module;
-	x11->monitorStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-
-	SessionId = x11->commonModule.sessionId;
-	x11->displayNum = detect_free_display();
-
-	WLog_Print(gModuleLog, WLOG_DEBUG, "s %d, using display %d", SessionId, x11->displayNum);
-	pipeName = (char*) malloc(256);
-	freerds_named_pipe_get_endpoint_name(x11->displayNum, "X11", pipeName, 256);
-
-	filename = GetNamedPipeUnixDomainSocketFilePathA(pipeName);
-
-	if (PathFileExistsA(filename))
-	{
-		DeleteFileA(filename);
-		status = 1;
+	if (!getPropertyStringWrapper(x11->commonModule.baseConfigPath, &g_Config, "startscript", x11StartScript, 256)) {
+		char* moduleName = strchr(x11->commonModule.baseConfigPath, '.') + 1;
+		snprintf(x11StartScript,  MAXPATHLEN - 1, "start_%s", moduleName);
+	}
+	if (x11StartScript[0] == '/') {
+		x11StartScriptQualified[0] = '\0';
+		strncat(x11StartScriptQualified, x11StartScript, MAXPATHLEN - 1);
+	} else {
+		snprintf(x11StartScriptQualified, MAXPATHLEN - 1, "%s/%s", FREERDS_SBIN_PATH, x11StartScript);
 	}
 
-	free(filename);
-
-	sprintf_s(envstr, sizeof(envstr), ":%d", (int) (x11->displayNum));
-	SetEnvironmentVariableEBA(&x11->commonModule.envBlock, "DISPLAY", envstr);
-
-	sprintf_s(commandLine, sizeof(commandLine), "%s :%d -geometry %dx%d -depth %d -dpi 96",
-			"Xrds", (int) (x11->displayNum), module->desktopWidth, module->desktopHeight, 24);
-
-	/* Get the user's home directory. */
-	lpCurrentDir = NULL;
-	cchSize = sizeof(currentDir);
-	ZeroMemory(currentDir, sizeof(currentDir));
-	if (GetUserProfileDirectoryA(x11->commonModule.userToken, currentDir, &cchSize))
+	pid_t child_pid = fork();
+	if (child_pid == -1)
 	{
-		WLog_Print(gModuleLog, WLOG_DEBUG, "HOME=%s", currentDir);
-		lpCurrentDir = currentDir;
-	}
-
-	/* Extract environment variables from /etc/environment. */
-	file = fopen("/etc/environment", "r");
-	if (file)
-	{
-		char line[2048];
-
-		while (fgets(line, sizeof(line), file))
-		{
-			char *token;
-
-			token = strstr(line, "=");
-			if (token)
-			{
-				char *name;
-				char *value;
-
-				*token = '\0';
-				name = line;
-				value = token + 1;
-
-				/* Remove whitespace from the environment variable name. */
-				name = trim_string(name);
-
-				/* Remove whitespace and unquote the environment variable value. */
-				value = unquote_string(value);
-
-				/* Set the environment variable. */
-				SetEnvironmentVariableEBA(&x11->commonModule.envBlock, name, value);
-			}
-		}
-
-		fclose(file);
-	}
-
-	/* Propagate environment variables. */
-	for (i = 0; i < (sizeof(envNames) / sizeof(envNames[0])); i++)
-	{
-		const char* envname = envNames[i];
-
-		envstrp = getenv(envname);
-		if (envstrp)
-		{
-			WLog_Print(gModuleLog, WLOG_DEBUG, "%s=%s", envname, envstrp);
-			SetEnvironmentVariableEBA(&x11->commonModule.envBlock, envname, envstrp);
-		}
-	}
-
-	x11_rds_module_reset_process_informations(&(x11->X11StartupInfo), &(x11->X11ProcessInformation));
-
-        int userlog = open("/tmp/user.log", O_WRONLY|O_CREAT|O_APPEND);
-        dup2(userlog, 1);
-        dup2(userlog, 2);
-        close(userlog);
-
-	status = CreateProcessAsUserA(x11->commonModule.userToken, NULL, commandLine,
-			NULL, NULL, FALSE, 0, x11->commonModule.envBlock, NULL,
-			&(x11->X11StartupInfo), &(x11->X11ProcessInformation));
-
-	if (!status)
-	{
-		WLog_Print(gModuleLog, WLOG_ERROR , "s %d, problem starting Xrds (status %d - cmd %s)",
-		SessionId, status, commandLine);
+		WLog_Print(gModuleLog, WLOG_ERROR, "Cannot fork(): %s", strerror(errno));
 		free(pipeName);
 		return NULL;
 	}
-
-	WLog_Print(gModuleLog, WLOG_DEBUG, "s %d, Xrds Process started: %d (pid %d - cmd %s)",
-			SessionId, status, x11->X11ProcessInformation.dwProcessId, commandLine);
-
-	if (!WaitNamedPipeA(pipeName, 5 * 1000))
+	else if (child_pid != 0)
 	{
-		WLog_Print(gModuleLog, WLOG_ERROR, "s %d: WaitNamedPipe failure: %s\n", SessionId, pipeName);
-		free(pipeName);
-		return NULL;
+		// Parent process
+		x11->childPid = child_pid;
+		if (wait_named_pipe_exists(child_pid, pipeName) == 0) {
+			WLog_Print(gModuleLog, WLOG_DEBUG, "Success - Returning pipeName: %s", pipeName);
+			return pipeName;
+		} else {
+			free(pipeName);
+			return NULL;
+		}
 	}
 
-	x11_rds_module_reset_process_informations(&(x11->CSStartupInfo), &(x11->CSProcessInformation));
-	x11_rds_module_reset_process_informations(&(x11->WMStartupInfo), &(x11->WMProcessInformation));
+	signal(SIGCHLD, SIG_DFL);
+	// The child process will execl() or _exit() trying; malloc() is now free (no pun intended)
+	char buf[256];
+	buf[255] = '\0';
 
-	sprintf_s(envstr, sizeof(envstr), "%d", (int) (x11->commonModule.sessionId));
-	SetEnvironmentVariableEBA(&x11->commonModule.envBlock, "FREERDS_SID", envstr);
-
-	/* Start the FreeRDS channel server. */
-	strcpy(startupname, "freerds-channels");
-
-#if USE_IMPERSONATION
-	status = CreateProcess(NULL, startupname,
+	int maxfd;
+#ifdef F_MAXFD // on some BSD derivates
+	maxfd = fcntl(0, F_MAXFD);
 #else
-	status = CreateProcessAsUserA(x11->commonModule.userToken, NULL, startupname,
+	maxfd = sysconf(_SC_OPEN_MAX);
 #endif
-		NULL, NULL, FALSE, 0, x11->commonModule.envBlock, NULL,
-		&(x11->CSStartupInfo), &(x11->CSProcessInformation));
+	int fd;
+	for(fd=3; fd<maxfd; fd++)
+		close(fd);
 
-	if (!status)
-	{
-		WLog_Print(gModuleLog, WLOG_DEBUG, "s %d, problem starting %s (status %d)", SessionId, startupname, status);
-		x11_rds_stop_process(&(x11->X11ProcessInformation));
-		free(pipeName);
-		return NULL;
-	}
+	char* path = strdup(getenv("PATH"));
+	clearenv();
+	setenv("PATH", path, 0);
+	setenv("DISPLAY", displayName, 0);
 
-	WLog_Print(gModuleLog, WLOG_DEBUG, "s %d: CS process started: %d (pid %d)", SessionId, status, x11->CSProcessInformation.dwProcessId);
+	snprintf(buf, 255, "%d", module->desktopWidth);
+	setenv("FREERDS_DESKTOP_WIDTH", buf, 0);
+	snprintf(buf, 255, "%d", module->desktopHeight);
+	setenv("FREERDS_DESKTOP_HEIGHT", buf, 0);
+	setenv("FREERDS_DESKTOP_DEPTH", "24", 0);
+	setenv("FREERDS_DESKTOP_DPI", "96", 0);
 
-	/* Start the window manager. */
+	snprintf(buf, sizeof(buf), "%d", (int) (x11->commonModule.sessionId));
+	setenv("FREERDS_SID", buf, 0);
+
 	if (x11->commonModule.userToken == 0)
 	{
-                WLog_Print(gModuleLog, WLOG_DEBUG, "No user token, running greeter");
-		strcpy(startupname, "simple_greeter");
+		chdir("/");
 	}
 	else
 	{
-		if (!getPropertyStringWrapper(x11->commonModule.baseConfigPath, &g_Config, "startwm", startupname, 256))
+		struct passwd *pw = getpwnam (x11->commonModule.userName);
+
+		setenv ("HOME", pw->pw_dir, 0);
+		setenv ("USER", pw->pw_name, 0);
+		setenv ("LOGNAME", pw->pw_name, 0);
+		setenv ("SHELL", pw->pw_shell, 0);
+
+                int rc = setgid((gid_t) pw->pw_gid);
+                if (rc < 0)
 		{
-                        WLog_Print(gModuleLog, WLOG_DEBUG, "User is authenticated, running startwm.sh");
-			strcpy(startupname, "startwm.sh");
 		}
                 else
-                {
-                        WLog_Print(gModuleLog, WLOG_DEBUG, "User is authenticated, but falling back to freerds-channels");
-                }
+		{
+			initgroups(pw->pw_name, pw->pw_gid);
+		}
+		setuid(pw->pw_uid);
+		chdir(pw->pw_dir);
+		setsid();
+
+		if (x11->commonModule.childProcessCallback)
+		{
+			x11->commonModule.childProcessCallback(x11->commonModule.childProcessCallbackData);
+		}
 	}
+	execl(x11StartScriptQualified, x11StartScript, displayName, (char *) NULL);
 
-	status = CreateProcessAsUserA(x11->commonModule.userToken, NULL, startupname,
-		NULL, NULL, FALSE, 0, x11->commonModule.envBlock, lpCurrentDir,
-		&(x11->WMStartupInfo), &(x11->WMProcessInformation));
-
-	if (!status)
-	{
-		WLog_Print(gModuleLog, WLOG_DEBUG, "s %d, problem starting %s (status %d)", SessionId, startupname, status);
-		x11_rds_stop_process(&(x11->X11ProcessInformation));
-		x11_rds_stop_process(&(x11->CSProcessInformation));
-		free(pipeName);
-		return NULL;
-	}
-
-	WLog_Print(gModuleLog, WLOG_DEBUG, "s %d: WM process started: %d (pid %d)", SessionId, status, x11->WMProcessInformation.dwProcessId);
-
-	/* Start the monitoring thread. */
-	x11->monitorThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE) monitoring_thread, x11, 0, NULL);
-
-	return pipeName;
+	WLog_Print(gModuleLog, WLOG_ERROR, "Cannot execl() %s: %s", x11StartScriptQualified, strerror(errno));
+	_exit(253);
 }
 
 int x11_rds_module_stop(RDS_MODULE_COMMON* module)
 {
-	int ret = 0;
-	char buf[256];
 	rdsModuleX11* x11 = (rdsModuleX11*) module;
 
-	WLog_Print(gModuleLog, WLOG_TRACE, "Stop called");
-
-	SetEvent(x11->monitorStopEvent);
-	WaitForSingleObject(x11->monitorThread, INFINITE);
-
-	ret = x11_rds_stop_process(&(x11->WMProcessInformation));
-	ret = x11_rds_stop_process(&(x11->CSProcessInformation));
-	ret = x11_rds_stop_process(&(x11->X11ProcessInformation));
-
-	/* clean up in case x server wasn't shut down cleanly */
-
-	snprintf(buf,256, X11_LOCKFILE_FORMAT, x11->displayNum);
-	DeleteFileA(buf);
-
-	snprintf(buf,256, X11_UNIX_SOCKET_FORMAT, x11->displayNum);
-	DeleteFileA(buf);
-
-	return ret;
+	if (! x11->childPid) {
+		WLog_Print(gModuleLog, WLOG_ERROR, "x11 stop: not started!");
+		return -1;
+	}
+		
+	WLog_Print(gModuleLog, WLOG_INFO, "Stopping");
+	kill(x11->childPid, SIGTERM);
+	int waitStatus = waitpid(x11->childPid, &waitStatus, 0);
+	return (waitStatus == 0) ? 0 : -1;
 }
+
 
 int RdsModuleEntry(RDS_MODULE_ENTRY_POINTS* pEntryPoints)
 {
@@ -529,3 +328,4 @@ int RdsModuleEntry(RDS_MODULE_ENTRY_POINTS* pEntryPoints)
 
 	return 0;
 }
+

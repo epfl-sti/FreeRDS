@@ -38,6 +38,8 @@ struct _RDS_MODULE_COMMON
 	char* baseConfigPath;
 	int desktopWidth;
 	int desktopHeight;
+	void (*childProcessCallback)(void *);
+	void* childProcessCallbackData;
 };
 typedef struct _RDS_MODULE_COMMON RDS_MODULE_COMMON;
 

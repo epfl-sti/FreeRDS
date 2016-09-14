@@ -32,6 +32,7 @@
 
 #include <limits.h>
 #include <signal.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -62,25 +63,25 @@ struct rds_module_x11
 	RDS_MODULE_COMMON commonModule;
 	UINT32 displayNum;
 	pid_t childPid;
-
-	// TODO: rinse all of these.
-	STARTUPINFO X11StartupInfo;
-	PROCESS_INFORMATION X11ProcessInformation;
-
-	HANDLE monitorThread;
-	HANDLE monitorStopEvent;
-	STARTUPINFO CSStartupInfo;
-	PROCESS_INFORMATION CSProcessInformation;
-	STARTUPINFO WMStartupInfo;
-	PROCESS_INFORMATION WMProcessInformation;
+	pthread_t waitChildThread;
+	pthread_mutex_t mu;
+	BOOL sessionStopped;  // Guarded by mu
 };
 typedef struct rds_module_x11 rdsModuleX11;
 
-void x11_rds_module_reset_process_informations(STARTUPINFO* si, PROCESS_INFORMATION* pi)
-{
-	ZeroMemory(si, sizeof(STARTUPINFO));
-	si->cb = sizeof(STARTUPINFO);
-	ZeroMemory(pi, sizeof(PROCESS_INFORMATION));
+static void* waitChildExitThenStopSession(void* x11void) {
+	int exitCode;
+	rdsModuleX11* x11 = (rdsModuleX11*) x11void;
+	
+	waitpid(x11->childPid, &exitCode, 0);  // Blocks thread
+	pthread_mutex_lock(&x11->mu);
+	BOOL shouldShutdown = ! x11->sessionStopped;
+	pthread_mutex_unlock(&x11->mu);
+	if (shouldShutdown)
+	{
+		g_Status.shutdown(x11->commonModule.sessionId);
+	}
+	return NULL;
 }
 
 RDS_MODULE_COMMON* x11_rds_module_new(void)
@@ -176,8 +177,6 @@ char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 	char displayName[256];
 	sprintf_s(displayName, 255, ":%d", x11->displayNum);
 
-	signal(SIGCHLD, SIG_IGN);  // Thwarting a zombie apocalypse: it's that simple.
-
 	char* pipeName = (char*) malloc(MAXPATHLEN);
 	if (! pipeName)
 	{
@@ -216,6 +215,7 @@ char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 	{
 		// Parent process
 		x11->childPid = child_pid;
+		pthread_create(&x11->waitChildThread, NULL, waitChildExitThenStopSession, (void *) x11);
 		if (wait_named_pipe_exists(child_pid, pipeName) == 0) {
 			WLog_Print(gModuleLog, WLOG_DEBUG, "Success - Returning pipeName: %s", pipeName);
 			return pipeName;
@@ -225,7 +225,6 @@ char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 		}
 	}
 
-	signal(SIGCHLD, SIG_DFL);
 	// The child process will execl() or _exit() trying; malloc() is now free (no pun intended)
 	char buf[256];
 	buf[255] = '\0';
@@ -257,6 +256,7 @@ char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 
 	if (x11->commonModule.userToken == 0)
 	{
+		setpgrp();
 		chdir("/");
 	}
 	else
@@ -269,12 +269,13 @@ char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 		setenv ("SHELL", pw->pw_shell, 0);
 
                 int rc = setgid((gid_t) pw->pw_gid);
-                if (rc < 0)
-		{
-		}
-                else
+                if (rc == 0)
 		{
 			initgroups(pw->pw_name, pw->pw_gid);
+		}
+		if (x11->commonModule.childProcessCallback)
+		{
+			x11->commonModule.childProcessCallback(x11->commonModule.childProcessCallbackData);
 		}
 		setuid(pw->pw_uid);
 		if (chdir(pw->pw_dir))
@@ -283,10 +284,6 @@ char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 		}
 		setsid();
 
-		if (x11->commonModule.childProcessCallback)
-		{
-			x11->commonModule.childProcessCallback(x11->commonModule.childProcessCallbackData);
-		}
 	}
 	execl(x11StartScriptQualified, x11StartScript, displayName, (char *) NULL);
 
@@ -298,15 +295,36 @@ int x11_rds_module_stop(RDS_MODULE_COMMON* module)
 {
 	rdsModuleX11* x11 = (rdsModuleX11*) module;
 
-	if (! x11->childPid) {
+	if (! x11->childPid)
+	{
 		WLog_Print(gModuleLog, WLOG_ERROR, "x11 stop: not started!");
 		return -1;
 	}
-		
-	WLog_Print(gModuleLog, WLOG_INFO, "Stopping");
-	kill(x11->childPid, SIGTERM);
-	int waitStatus = waitpid(x11->childPid, &waitStatus, 0);
-	return (waitStatus == 0) ? 0 : -1;
+	pthread_mutex_lock(&x11->mu);
+	BOOL wasStopped = x11->sessionStopped;
+	x11->sessionStopped = TRUE;
+	pthread_mutex_unlock(&x11->mu);
+
+	if (wasStopped)
+	{
+		WLog_Print(gModuleLog, WLOG_DEBUG, "x11 stop: startup script already exited");
+		return 0;
+	}
+
+	WLog_Print(gModuleLog, WLOG_INFO, "Stopping session %d", x11->commonModule.sessionId);
+	
+	kill(-x11->childPid, SIGTERM);
+	pthread_join(x11->waitChildThread, NULL); // Thread will waitpid()
+
+	/* clean up in case X server wasn't shut down cleanly */
+	char buf[MAXPATHLEN];
+	snprintf(buf, MAXPATHLEN - 1, X11_LOCKFILE_FORMAT, x11->displayNum);
+	unlink(buf);
+
+	snprintf(buf, MAXPATHLEN - 1, X11_UNIX_SOCKET_FORMAT, x11->displayNum);
+	unlink(buf);
+
+	return 0;
 }
 
 

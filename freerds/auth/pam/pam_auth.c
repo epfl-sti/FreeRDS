@@ -24,6 +24,7 @@
 #include <winpr/crt.h>
 #include <winpr/path.h>
 
+#include <unistd.h>
 #include <security/pam_appl.h>
 
 #include "pam_auth.h"
@@ -197,17 +198,27 @@ int rds_auth_module_session_stop(struct rds_auth_module_pam* pam) {
 	return 0;
 }
 
-void rds_auth_module_on_child_process(struct rds_auth_module_pam* pam) {
+void rds_auth_module_on_child_process(struct rds_auth_module_pam* pam)
+{
 	if (!pam)
 		return;
 	char **envcp = pam_getenvlist (pam->ph);
-	if (NULL != envcp) {
-		while (NULL != *envcp) {
+	if (NULL != envcp)
+	{
+		while (NULL != *envcp)
+		{
 			char* equals = strchr(*envcp, '=');
 			*equals = '\0';
 			setenv(*envcp, equals + 1, 1);
 			envcp++;
 		}
+	}
+	int ret = pam_setcred (pam->ph, PAM_ESTABLISH_CRED);
+	if (PAM_SUCCESS != ret)
+	{
+		printf("pam_setcred: %s", pam_strerror (pam->ph, ret));
+		(void) pam_end (pam->ph, ret);
+		_exit (250);
 	}
 }
 

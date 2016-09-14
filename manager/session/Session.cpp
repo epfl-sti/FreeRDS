@@ -312,7 +312,6 @@ namespace freerds
 	{
 		mAuth = *transferred_auth;
 		*transferred_auth = NULL;
-		std::string pName;
 
 		if (mSessionStarted)
 		{
@@ -359,23 +358,21 @@ namespace freerds
 			mAuth->getChildProcessCallback(&(mCurrentModuleContext->childProcessCallback), &(mCurrentModuleContext->childProcessCallbackData));
 		}
 
-		pName = currentModule->start(mCurrentModuleContext);
+		mSessionStarted = true;
+		setConnectState(WTSConnected);
+		if (mAuth)
+			mAuth->sessionStart();
 
+		std::string pName = currentModule->start(mCurrentModuleContext);
 		if (pName.length() == 0)
 		{
 			WLog_Print(logger_Session, WLOG_ERROR, "startModule failed, no pipeName was returned");
 			return false;
 		}
-		else
-		{
-			pipeName = pName;
-			mPipeName = pName;
-			mSessionStarted = true;
-			setConnectState(WTSConnected);
-			if (mAuth)
-				mAuth->sessionStart();
-			return true;
-		}
+
+		pipeName = pName;
+		mPipeName = pName;
+		return true;
 	}
 
 	bool Session::stopModule()

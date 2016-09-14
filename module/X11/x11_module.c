@@ -277,7 +277,10 @@ char* x11_rds_module_start(RDS_MODULE_COMMON* module)
 			initgroups(pw->pw_name, pw->pw_gid);
 		}
 		setuid(pw->pw_uid);
-		chdir(pw->pw_dir);
+		if (chdir(pw->pw_dir))
+		{
+			WLog_Print(gModuleLog, WLOG_ERROR, "chdir(%s): %s", pw->pw_dir, strerror(errno));
+		}
 		setsid();
 
 		if (x11->commonModule.childProcessCallback)
